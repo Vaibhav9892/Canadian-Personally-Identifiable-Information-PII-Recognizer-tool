@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canadian PII Detector</title>
+<style>
+  :root { --bg:#0f1420; --card:#161d2e; --ink:#e7ecf5; --mut:#93a1bd; --line:#26314a; --accent:#5b8def; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:860px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mut); margin:0 0 18px; font-size:13px; }
+  .banner { background:#3a2a12; border:1px solid #6b4d18; color:#f0d9a8; padding:9px 12px; border-radius:8px; font-size:13px; margin-bottom:18px; }
+  textarea { width:100%; min-height:150px; background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:12px; font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical; }
+  .row { display:flex; gap:10px; margin:12px 0; flex-wrap:wrap; align-items:center; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 16px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  label.chk { color:var(--mut); font-size:13px; display:flex; gap:6px; align-items:center; margin-left:auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-top:14px; }
+  .card h3 { margin:0 0 10px; font-size:13px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
+  mark { padding:1px 4px; border-radius:5px; background:#274070; color:#dce8ff; font-weight:600; position:relative; }
+  mark .lab { font-size:10px; color:#9db8ef; margin-left:4px; vertical-align:top; }
+  .out { white-space:pre-wrap; font:14px/1.6 ui-monospace,Menlo,monospace; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:600; }
+  .pill { font:11px ui-monospace,monospace; background:#1e263c; padding:1px 6px; border-radius:20px; border:1px solid var(--line); color:#bcd; }
+  .empty { color:var(--mut); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Canadian PII Detector</h1>
+  <p class="sub">Fine-tuned spaCy NER · SIN · ITN · Alberta PHN · bank account · Alberta DL · passport · provider ID</p>
+  <div class="banner">⚠ Testing/synthetic use only. Do not paste real personal information — this demo is not a hardened production service.</div>
+
+  <textarea id="txt" placeholder="Paste text here… e.g. Please update SIN 130 692 544 and PHN 257-574-243.">Please update SIN 130 692 544 in the payroll system and confirm PHN 257-574-243.</textarea>
+
+  <div class="row">
+    <button id="btnDetect">Detect</button>
+    <button id="btnRedact" class="ghost">Redact</button>
+    <label class="chk"><input type="checkbox" id="canOnly" checked> Canadian PII only</label>
+  </div>
+
+  <div class="card" id="hlCard" style="display:none">
+    <h3>Highlighted</h3>
+    <div class="out" id="hl"></div>
+  </div>
+
+  <div class="card" id="redCard" style="display:none">
+    <h3>Redacted</h3>
+    <div class="out" id="red"></div>
+  </div>
+
+  <div class="card" id="tblCard" style="display:none">
+    <h3>Entities</h3>
+    <table><thead><tr><th>Value</th><th>Type</th><th>Tag</th><th>Span</th></tr></thead>
+    <tbody id="tbl"></tbody></table>
+  </div>
+</div>
+
+<script>
+const API = ""; // same origin
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function call(path) {
+  const body = { text: $("txt").value, canadian_only: $("canOnly").checked };
+  const r = await fetch(API + path, {
+    method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error("API error " + r.status);
+  return r.json();
+}
+
+function highlight(text, ents) {
+  ents = [...ents].sort((a,b) => a.start - b.start);
+  let html = "", cur = 0;
+  for (const e of ents) {
+    html += esc(text.slice(cur, e.start));
+    html += `<mark>${esc(text.slice(e.start, e.end))}<span class="lab">${e.tag}</span></mark>`;
+    cur = e.end;
+  }
+  html += esc(text.slice(cur));
+  return html;
+}
+
+function renderTable(ents) {
+  $("tbl").innerHTML = ents.length ? ents.map(e =>
+    `<tr><td>${esc(e.text)}</td><td>${e.label}</td><td><span class="pill">${e.tag}</span></td><td>${e.start}–${e.end}</td></tr>`
+  ).join("") : `<tr><td colspan="4" class="empty">No entities detected.</td></tr>`;
+  $("tblCard").style.display = "block";
+}
+
+$("btnDetect").onclick = async () => {
+  try {
+    const d = await call("/detect");
+    $("hl").innerHTML = highlight($("txt").value, d.entities);
+    $("hlCard").style.display = "block";
+    $("redCard").style.display = "none";
+    renderTable(d.entities);
+  } catch (e) { alert(e.message); }
+};
+
+$("btnRedact").onclick = async () => {
+  try {
+    const d = await call("/redact");
+    $("red").textContent = d.redacted;
+    $("redCard").style.display = "block";
+    $("hl").innerHTML = highlight($("txt").value, d.entities);
+    $("hlCard").style.display = "block";
+    renderTable(d.entities);
+  } catch (e) { alert(e.message); }
+};
+</script>
+</body>
+</html>

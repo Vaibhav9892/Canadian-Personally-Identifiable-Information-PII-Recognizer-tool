@@ -1,0 +1,6 @@
+spacy==3.7.5
+click<8.2
+typer<0.10
+numpy<2
+scipy
+matplotlib
